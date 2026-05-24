@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1095819598112",
+    "project_id": "trippertrack",
+    "storage_bucket": "trippertrack.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1095819598112:android:6e4dc58652a5058659df45",
+        "android_client_info": {
+          "package_name": "com.trippertrack.trippertrack"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD828OYcTDM7O4qu_W-v8bv-QzprgrniWw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1095819598112:android:e7106d9044a63c2359df45",
+        "android_client_info": {
+          "package_name": "com.trippertrack.trippertrack.dev"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD828OYcTDM7O4qu_W-v8bv-QzprgrniWw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

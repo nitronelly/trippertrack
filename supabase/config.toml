@@ -1,0 +1,2 @@
+[functions.process-meetup-push-queue]
+verify_jwt = false
