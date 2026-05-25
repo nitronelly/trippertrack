@@ -168,6 +168,7 @@ function getPinEmoji(type) {
     case "food":
       return "🍔";
     case "meetup":
+
       return "⏰";
     case "custom":
       return "📍";
@@ -259,6 +260,7 @@ const EmojiMapMarker = React.memo(function EmojiMapMarker({
   onPress,
   size = 24,
   isSelected = false,
+  showPulse = false,
 }) {
   const [tracksViewChanges, setTracksViewChanges] = React.useState(true);
 
@@ -281,6 +283,8 @@ const EmojiMapMarker = React.memo(function EmojiMapMarker({
       anchor={{ x: 0.5, y: 0.5 }}
     >
       <View style={styles.markerOuter} collapsable={false}>
+        {showPulse ? <View style={styles.meetupPulseRing} /> : null}
+
         <View
           style={[
             styles.emojiPinWrap,
@@ -375,6 +379,19 @@ function CrewCard({ item, onPress, onFind, onYouOk }) {
   );
 }
 
+async function triggerMessageHaptic(kind = "group") {
+  try {
+    if (kind === "private") {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      return;
+    }
+
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  } catch (e) {
+    console.log("TT_MESSAGE_HAPTIC_FAIL", e);
+  }
+}
+
 function PrivateChatScreen({
   eventId,
   currentUserId,
@@ -455,9 +472,11 @@ function PrivateChatScreen({
   useEffect(() => {
     if (!threadId) return;
 
-    const unsubscribe = subscribeToPrivateMessages(threadId, (incoming) => {
+    const unsubscribe = subscribeToPrivateMessages(threadId, async (incoming) => {
       if (!incoming?.id) return;
-
+      if (incoming.senderUserId !== currentUserId) {
+        await triggerMessageHaptic("private");
+      }
       setMessages((prev) => {
         const existingIndex = prev.findIndex((item) => item.id === incoming.id);
 
@@ -1248,13 +1267,8 @@ function CrewChatScreen({
       if (!incoming?.id) return;
 
       if (incoming.senderUserId !== currentUserId) {
+        await triggerMessageHaptic("group");
         console.log("TT_GROUP_INCOMING_TO_CREW_CHAT", incoming);
-
-        try {
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        } catch (e) {
-          console.log("TT_MESSAGE_HAPTIC_FAIL", e);
-        }
 
         onIncomingGroupMessage?.(incoming);
       }
@@ -1597,7 +1611,7 @@ function MapScreen({
   pinReloadKey,
   onPinsChanged,
 }) {
-
+  const [meetupPulseOn, setMeetupPulseOn] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState(null);
   const [isMapSheetOpen, setIsMapSheetOpen] = useState(false);
   const [showRadar, setShowRadar] = useState(false);
@@ -1704,7 +1718,7 @@ function MapScreen({
     if (meters <= 20) return "Nearby";
     if (meters < 1000) return `${meters}m away`;
 
-    return `${(meters / 1000).toFixed(1)}km away`;
+    return `${(meters / 1609.344).toFixed(1)}miles away`;
   }
 
   const sortedPinsForSheet = useMemo(() => {
@@ -1939,6 +1953,7 @@ function MapScreen({
           meetupAmPm,
           meetupDayOffset
         ),
+        imageUrl: pendingRadarMeetPlace?.imageUrl || null,
       });
       await reloadSharedPins(eventId);
       onPinsChanged?.();
@@ -1987,7 +2002,31 @@ function MapScreen({
   }
 
 
+  useEffect(() => {
+    function pulseMeetups() {
+      setMeetupPulseOn(true);
 
+      setTimeout(() => {
+        setMeetupPulseOn(false);
+
+        setTimeout(() => {
+          setMeetupPulseOn(true);
+
+          setTimeout(() => {
+            setMeetupPulseOn(false);
+          }, 550);
+
+        }, 300);
+
+      }, 400);
+    }
+
+    pulseMeetups();
+
+    const interval = setInterval(pulseMeetups, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (rawHeading == null) return;
@@ -2064,7 +2103,7 @@ function MapScreen({
   useEffect(() => {
     const interval = setInterval(() => {
       setNowTick(Date.now());
-    }, 30000);
+    }, 10000);
 
     return () => clearInterval(interval);
   }, []);
@@ -2435,7 +2474,7 @@ function MapScreen({
       if (selectedDistanceMeters < 1000) {
         return `~${Math.round(selectedDistanceMeters / 5) * 5}m away`;
       }
-      return `~${(selectedDistanceMeters / 1000).toFixed(1)}km away`;
+      return `~${(selectedDistanceMeters / 1609.344).toFixed(1)} miles away`;
     }
 
     if (worstAccuracy != null && worstAccuracy >= 20) {
@@ -2444,13 +2483,13 @@ function MapScreen({
       if (selectedDistanceMeters < 1000) {
         return `~${Math.round(selectedDistanceMeters / 5) * 5}m away`;
       }
-      return `~${(selectedDistanceMeters / 1000).toFixed(1)}km away`;
+      return `~${(selectedDistanceMeters / 1609.344).toFixed(1)} miles away`;
     }
 
     if (selectedDistanceMeters <= 8) return "Very close";
     if (selectedDistanceMeters <= 20) return "Nearby";
     if (selectedDistanceMeters < 1000) return `${selectedDistanceMeters}m away`;
-    return `${(selectedDistanceMeters / 1000).toFixed(1)}km away`;
+    return `${(selectedDistanceMeters / 1609.344).toFixed(1)} miles away`;
   }, [selectedDistanceMeters, myLocation, selectedFriend]);
 
 
@@ -2594,10 +2633,9 @@ function MapScreen({
       setIsMeSelected(false);
       setSelectedPin(targetPin);
       setNavigationTarget(null);
-      console.log("TT_MAP_FOCUS_FRIEND", {
-        focusId: focusRequest.id,
-        target,
-        friendCoords,
+      console.log("TT_MAP_FOCUS_PIN", {
+        pinId: focusRequest.pinId,
+        targetPin,
       });
       zoomToTarget(targetPin.coordinate);
       onFocusHandled?.();
@@ -3015,8 +3053,27 @@ function MapScreen({
       const decoded = decodePolyline(route.geometry);
       setWalkingRouteCoords(decoded);
 
-      const minutes = Math.round(route.duration / 60);
-      setWalkingRouteText(`${minutes} min walk`);
+      const miles = route.distance / 1609.344;
+
+      const totalMinutes = Math.round(miles * 20);
+      const hours = Math.floor(totalMinutes / 60);
+      const remainingMinutes = totalMinutes % 60;
+
+      const walkTimeText =
+        totalMinutes >= 60
+          ? `${hours}h ${remainingMinutes} min walk`
+          : `${totalMinutes} min walk`;
+
+      console.log("TT_ROUTE_TEXT_SET", {
+        distanceMeters: route.distance,
+        miles,
+        totalMinutes,
+        walkTimeText,
+      });
+
+      setWalkingRouteText(
+        `${miles.toFixed(1)} miles • ${walkTimeText}`
+      );
     } catch (err) {
       console.log("Route fetch failed:", err);
     }
@@ -3149,6 +3206,18 @@ function MapScreen({
       />
     );
   }
+  const displayDistanceLabel =
+    navMode === "street" && walkingRouteText
+      ? walkingRouteText
+      : selectedDistanceLabel;
+
+  console.log("TT_DISTANCE_LABEL", {
+    navMode,
+    walkingRouteText,
+    selectedDistanceLabel,
+    displayDistanceLabel,
+  });
+
 
   return (
     <View style={[styles.mapScreenWrap, { position: "relative" }]}>
@@ -3241,6 +3310,7 @@ function MapScreen({
                 key={pin.id}
                 coordinate={pin.coordinate}
                 emoji={getPinEmoji(pin.type)}
+                showPulse={pin.type === "meetup" && meetupPulseOn}
                 onPress={() => {
                   lastDistanceRef.current = null;
                   hasTriggeredNearHapticRef.current = false;
@@ -3415,8 +3485,22 @@ function MapScreen({
               onPress={() => {
                 setNavMode("street");
 
-                if (myLocation && selectedTargetCoordinate) {
-                  fetchWalkingRoute(myLocation, selectedTargetCoordinate);
+                const routeTarget = selectedPin?.coordinate
+                  ? selectedPin.coordinate
+                  : selectedRadarTarget
+                    ? {
+                      latitude: selectedRadarTarget.latitude,
+                      longitude: selectedRadarTarget.longitude,
+                    }
+                    : selectedTargetCoordinate;
+
+                console.log("TT_WALK_BUTTON", {
+                  myLocation,
+                  routeTarget,
+                });
+
+                if (myLocation && routeTarget) {
+                  fetchWalkingRoute(myLocation, routeTarget);
                 }
               }}
               activeOpacity={0.85}
@@ -3705,11 +3789,13 @@ function MapScreen({
                       </TouchableOpacity>
                     )}
 
-                    {selectedDistanceMeters != null && selectedDistanceLabel !== "Location weak" ? (
+
+                    {displayDistanceLabel ? (
                       <Text style={styles.sheetSub}>
-                        {selectedDistanceLabel}
+                        {displayDistanceLabel}
                       </Text>
                     ) : null}
+
 
                     {selectedPin.type === "meetup" && selectedPin.meetupAt ? (
                       <>
@@ -3765,7 +3851,7 @@ function MapScreen({
 
                     {selectedDistanceMeters != null && selectedDistanceLabel !== "Location weak" ? (
                       <Text style={styles.sheetSub}>
-                        {selectedDistanceLabel}
+                        {displayDistanceLabel}
                       </Text>
                     ) : null}
 
@@ -3970,7 +4056,7 @@ function MapScreen({
 
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <Text style={styles.sheetSub}>
-                  {selectedDistanceLabel}
+                  {displayDistanceLabel}
                 </Text>
 
 
@@ -4037,149 +4123,181 @@ function MapScreen({
             </View>
           )}
         </>
-      )}
+      )
+      }
 
-      {selectedPin && pinViewMode === "full" && selectedPin.imageUrl ? (
-        <View style={styles.pinFullOverlay}>
-          <TouchableOpacity
-            activeOpacity={0.95}
-            style={styles.pinFullOverlayTouchable}
-            onPress={cycleSelectedPinView}
-          >
-            <Image
-              source={{ uri: selectedPin.imageUrl }}
-              style={styles.pinFullImage}
-              resizeMode="contain"
-            />
-
-            <View style={styles.pinFullHintWrap}>
-              <Text style={styles.pinFullHintText}>
-                Tap photo to shrink
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-
-
-
-      {showPinPicker && (
-        <View style={styles.pinPickerOverlay}>
-          <View style={styles.pinPickerCard}>
-            <Text style={styles.pinPickerTitle}>
-              {pendingPinCoordinate ? "Drop a pin" : "Meet Here"}
-            </Text>
-
-            <View style={styles.pinPickerGrid}>
-              <TouchableOpacity
-                style={styles.pinTypeButton}
-                onPress={() => addTypedPin("tent", "Tent")}
-              >
-                <Text style={styles.pinTypeText}>⛺ Tent</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.pinTypeButton}
-                onPress={() => addTypedPin("car", "Car")}
-              >
-                <Text style={styles.pinTypeText}>🚗 Car</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.pinTypeButton}
-                onPress={() => addTypedPin("food", "Food")}
-              >
-                <Text style={styles.pinTypeText}>🍔 Food</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.pinTypeButton}
-                onPress={() => addTypedPin("bar", "Bar")}
-              >
-                <Text style={styles.pinTypeText}>🍺 Bar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.pinTypeButton}
-                onPress={() => addTypedPin("stage", "Stage")}
-              >
-                <Text style={styles.pinTypeText}>🎵 Stage</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.pinTypeButton}
-                onPress={() => addTypedPin("entrance", "Entrance")}
-              >
-                <Text style={styles.pinTypeText}>🚪 Entrance</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.pinTypeButton}
-                onPress={() => addTypedPin("meetup", "Meetup")}
-              >
-                <Text style={styles.pinTypeText}>⏰ Timed Meetup</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.pinTypeButton, styles.pinTypeButtonWide]}
-                onPress={() => addTypedPin("custom", "Custom")}
-              >
-                <Text style={styles.pinTypeText}>📍 Custom</Text>
-              </TouchableOpacity>
-
-
-            </View>
-
+      {
+        selectedPin && pinViewMode === "full" && selectedPin.imageUrl ? (
+          <View style={styles.pinFullOverlay}>
             <TouchableOpacity
-              style={styles.pinPickerCancel}
-              onPress={() => {
-                setShowPinPicker(false);
-                setPendingPinCoordinate(null);
-              }}
+              activeOpacity={0.95}
+              style={styles.pinFullOverlayTouchable}
+              onPress={cycleSelectedPinView}
             >
-              <Text style={styles.pinPickerCancelText}>Cancel</Text>
+              <Image
+                source={{ uri: selectedPin.imageUrl }}
+                style={styles.pinFullImage}
+                resizeMode="contain"
+              />
+
+              <View style={styles.pinFullHintWrap}>
+                <Text style={styles.pinFullHintText}>
+                  Tap photo to shrink
+                </Text>
+              </View>
             </TouchableOpacity>
           </View>
-        </View>
-      )}
+        ) : null
+      }
 
-      {showMeetupPicker && (
-        <View style={styles.pinPickerOverlay}>
-          <View style={styles.pinPickerCard}>
-            <Text style={styles.pinPickerTitle}>Set meetup time</Text>
 
-            <Text style={styles.sheetSub}>
-              Pick a meetup time for this pin.
-            </Text>
 
-            <View style={styles.meetupPickerSection}>
+      {
+        showPinPicker && (
+          <View style={styles.pinPickerOverlay}>
+            <View style={styles.pinPickerCard}>
+              <Text style={styles.pinPickerTitle}>
+                {pendingPinCoordinate ? "Drop a pin" : "Meet Here"}
+              </Text>
+
+              <View style={styles.pinPickerGrid}>
+                <TouchableOpacity
+                  style={styles.pinTypeButton}
+                  onPress={() => addTypedPin("tent", "Tent")}
+                >
+                  <Text style={styles.pinTypeText}>⛺ Tent</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.pinTypeButton}
+                  onPress={() => addTypedPin("car", "Car")}
+                >
+                  <Text style={styles.pinTypeText}>🚗 Car</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.pinTypeButton}
+                  onPress={() => addTypedPin("food", "Food")}
+                >
+                  <Text style={styles.pinTypeText}>🍔 Food</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.pinTypeButton}
+                  onPress={() => addTypedPin("bar", "Bar")}
+                >
+                  <Text style={styles.pinTypeText}>🍺 Bar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.pinTypeButton}
+                  onPress={() => addTypedPin("stage", "Stage")}
+                >
+                  <Text style={styles.pinTypeText}>🎵 Stage</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.pinTypeButton}
+                  onPress={() => addTypedPin("entrance", "Entrance")}
+                >
+                  <Text style={styles.pinTypeText}>🚪 Entrance</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.pinTypeButton}
+                  onPress={() => addTypedPin("meetup", "Meetup")}
+                >
+                  <Text style={styles.pinTypeText}>⏰ Timed Meetup</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pinTypeButton, styles.pinTypeButtonWide]}
+                  onPress={() => addTypedPin("custom", "Custom")}
+                >
+                  <Text style={styles.pinTypeText}>📍 Custom</Text>
+                </TouchableOpacity>
+
+
+              </View>
+
+              <TouchableOpacity
+                style={styles.pinPickerCancel}
+                onPress={() => {
+                  setShowPinPicker(false);
+                  setPendingPinCoordinate(null);
+                }}
+              >
+                <Text style={styles.pinPickerCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )
+      }
+
+      {
+        showMeetupPicker && (
+          <View style={styles.pinPickerOverlay}>
+            <View style={styles.pinPickerCard}>
+              <Text style={styles.pinPickerTitle}>Set meetup time</Text>
+
+              <Text style={styles.sheetSub}>
+                Pick a meetup time for this pin.
+              </Text>
 
               <View style={styles.meetupPickerSection}>
-                <Text style={styles.meetupPickerLabel}>Day</Text>
 
+                <View style={styles.meetupPickerSection}>
+                  <Text style={styles.meetupPickerLabel}>Day</Text>
+
+                  <View style={styles.meetupOptionsRow}>
+                    {[
+
+                      { label: "Today", value: 0 },
+                      { label: "+1", value: 1 },
+                      { label: "+2", value: 2 },
+                      { label: "+3", value: 3 },
+                      { label: "+4", value: 4 },
+                      { label: "+5", value: 5 },
+                      { label: "+6", value: 6 },
+                      { label: "+7", value: 7 },
+
+                    ].map((option) => {
+                      const selected = meetupDayOffset === option.value;
+
+                      return (
+                        <TouchableOpacity
+                          key={option.value}
+                          style={[
+                            styles.meetupOptionChip,
+                            selected && styles.meetupOptionChipSelected,
+                          ]}
+                          onPress={() => setMeetupDayOffset(option.value)}
+                        >
+                          <Text
+                            style={[
+                              styles.meetupOptionText,
+                              selected && styles.meetupOptionTextSelected,
+                            ]}
+                          >
+                            {option.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+                <Text style={styles.meetupPickerLabel}>Hour</Text>
                 <View style={styles.meetupOptionsRow}>
-                  {[
-
-                    { label: "Today", value: 0 },
-                    { label: "+1", value: 1 },
-                    { label: "+2", value: 2 },
-                    { label: "+3", value: 3 },
-                    { label: "+4", value: 4 },
-                    { label: "+5", value: 5 },
-                    { label: "+6", value: 6 },
-                    { label: "+7", value: 7 },
-
-                  ].map((option) => {
-                    const selected = meetupDayOffset === option.value;
-
+                  {meetupHourOptions.map((hour) => {
+                    const selected = meetupHour12 === hour;
                     return (
                       <TouchableOpacity
-                        key={option.value}
+                        key={`hour-${hour}`}
                         style={[
                           styles.meetupOptionChip,
                           selected && styles.meetupOptionChipSelected,
                         ]}
-                        onPress={() => setMeetupDayOffset(option.value)}
+                        onPress={() => setMeetupHour12(hour)}
                       >
                         <Text
                           style={[
@@ -4187,179 +4305,156 @@ function MapScreen({
                             selected && styles.meetupOptionTextSelected,
                           ]}
                         >
-                          {option.label}
+                          {hour}
                         </Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
               </View>
-              <Text style={styles.meetupPickerLabel}>Hour</Text>
-              <View style={styles.meetupOptionsRow}>
-                {meetupHourOptions.map((hour) => {
-                  const selected = meetupHour12 === hour;
-                  return (
-                    <TouchableOpacity
-                      key={`hour-${hour}`}
-                      style={[
-                        styles.meetupOptionChip,
-                        selected && styles.meetupOptionChipSelected,
-                      ]}
-                      onPress={() => setMeetupHour12(hour)}
-                    >
-                      <Text
+
+              <View style={styles.meetupPickerSection}>
+                <Text style={styles.meetupPickerLabel}>Minutes</Text>
+                <View style={styles.meetupOptionsRow}>
+                  {meetupMinuteOptions.map((minute) => {
+                    const selected = meetupMinute === minute;
+                    return (
+                      <TouchableOpacity
+                        key={`minute-${minute}`}
                         style={[
-                          styles.meetupOptionText,
-                          selected && styles.meetupOptionTextSelected,
+                          styles.meetupOptionChip,
+                          selected && styles.meetupOptionChipSelected,
                         ]}
+                        onPress={() => setMeetupMinute(minute)}
                       >
-                        {hour}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                        <Text
+                          style={[
+                            styles.meetupOptionText,
+                            selected && styles.meetupOptionTextSelected,
+                          ]}
+                        >
+                          {String(minute).padStart(2, "0")}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.meetupAmPmRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.meetupAmPmButton,
+                    meetupAmPm === "AM" && styles.meetupAmPmButtonSelected,
+                  ]}
+                  onPress={() => setMeetupAmPm("AM")}
+                >
+                  <Text
+                    style={[
+                      styles.meetupAmPmText,
+                      meetupAmPm === "AM" && styles.meetupAmPmTextSelected,
+                    ]}
+                  >
+                    AM
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.meetupAmPmButton,
+                    meetupAmPm === "PM" && styles.meetupAmPmButtonSelected,
+                  ]}
+                  onPress={() => setMeetupAmPm("PM")}
+                >
+                  <Text
+                    style={[
+                      styles.meetupAmPmText,
+                      meetupAmPm === "PM" && styles.meetupAmPmTextSelected,
+                    ]}
+                  >
+                    PM
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.meetupPreviewCard}>
+                <Text style={styles.meetupPreviewText}>
+                  {meetupDayLabel} at{" "}
+                  {`${meetupHour12}:${String(meetupMinute).padStart(2, "0")} ${meetupAmPm}`}
+                </Text>
+              </View>
+
+              <View style={styles.sheetButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.sheetBtnSmall, { backgroundColor: COLORS.card2 }]}
+                  onPress={() => {
+                    setShowMeetupPicker(false);
+                    setPendingPinCoordinate(null);
+                  }}
+                >
+                  <Text style={styles.sheetBtnText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.sheetBtnSmall, { backgroundColor: COLORS.yellow }]}
+                  onPress={saveCustomTimedMeetupPin}
+                >
+                  <Text style={[styles.sheetBtnText, { color: "#1A1405" }]}>
+                    Set
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
+          </View>
+        )
+      }
 
-            <View style={styles.meetupPickerSection}>
-              <Text style={styles.meetupPickerLabel}>Minutes</Text>
-              <View style={styles.meetupOptionsRow}>
-                {meetupMinuteOptions.map((minute) => {
-                  const selected = meetupMinute === minute;
-                  return (
-                    <TouchableOpacity
-                      key={`minute-${minute}`}
-                      style={[
-                        styles.meetupOptionChip,
-                        selected && styles.meetupOptionChipSelected,
-                      ]}
-                      onPress={() => setMeetupMinute(minute)}
-                    >
-                      <Text
-                        style={[
-                          styles.meetupOptionText,
-                          selected && styles.meetupOptionTextSelected,
-                        ]}
-                      >
-                        {String(minute).padStart(2, "0")}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
+      {
+        deletePinTarget && (
+          <View style={[styles.pinPickerOverlay, { zIndex: 999, elevation: 999 }]}>
+            <View style={styles.deleteConfirmCard}>
+              <Text style={styles.pinPickerTitle}>Delete pin?</Text>
 
-            <View style={styles.meetupAmPmRow}>
-              <TouchableOpacity
-                style={[
-                  styles.meetupAmPmButton,
-                  meetupAmPm === "AM" && styles.meetupAmPmButtonSelected,
-                ]}
-                onPress={() => setMeetupAmPm("AM")}
-              >
-                <Text
-                  style={[
-                    styles.meetupAmPmText,
-                    meetupAmPm === "AM" && styles.meetupAmPmTextSelected,
-                  ]}
-                >
-                  AM
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.meetupAmPmButton,
-                  meetupAmPm === "PM" && styles.meetupAmPmButtonSelected,
-                ]}
-                onPress={() => setMeetupAmPm("PM")}
-              >
-                <Text
-                  style={[
-                    styles.meetupAmPmText,
-                    meetupAmPm === "PM" && styles.meetupAmPmTextSelected,
-                  ]}
-                >
-                  PM
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.meetupPreviewCard}>
-              <Text style={styles.meetupPreviewText}>
-                {meetupDayLabel} at{" "}
-                {`${meetupHour12}:${String(meetupMinute).padStart(2, "0")} ${meetupAmPm}`}
+              <Text style={styles.sheetSub}>
+                Delete "{deletePinTarget.label || "this pin"}"?
               </Text>
-            </View>
 
-            <View style={styles.sheetButtonsRow}>
-              <TouchableOpacity
-                style={[styles.sheetBtnSmall, { backgroundColor: COLORS.card2 }]}
-                onPress={() => {
-                  setShowMeetupPicker(false);
-                  setPendingPinCoordinate(null);
-                }}
-              >
-                <Text style={styles.sheetBtnText}>Cancel</Text>
-              </TouchableOpacity>
+              <View style={styles.sheetButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.sheetBtnSmall, { backgroundColor: COLORS.card2 }]}
+                  onPress={() => setDeletePinTarget(null)}
+                >
+                  <Text style={styles.sheetBtnText}>Cancel</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.sheetBtnSmall, { backgroundColor: COLORS.yellow }]}
-                onPress={saveCustomTimedMeetupPin}
-              >
-                <Text style={[styles.sheetBtnText, { color: "#1A1405" }]}>
-                  Set
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      )}
+                <TouchableOpacity
+                  style={[styles.sheetBtnSmall, { backgroundColor: COLORS.red }]}
+                  onPress={async () => {
+                    try {
+                      await deleteEventPin(deletePinTarget.id);
+                      await reloadSharedPins(eventId);
+                      onPinsChanged?.();
 
-      {deletePinTarget && (
-        <View style={[styles.pinPickerOverlay, { zIndex: 999, elevation: 999 }]}>
-          <View style={styles.deleteConfirmCard}>
-            <Text style={styles.pinPickerTitle}>Delete pin?</Text>
+                      if (selectedPin?.id === deletePinTarget.id) {
+                        setSelectedPin(null);
+                        setIsEditingPin(false);
+                      }
 
-            <Text style={styles.sheetSub}>
-              Delete "{deletePinTarget.label || "this pin"}"?
-            </Text>
-
-            <View style={styles.sheetButtonsRow}>
-              <TouchableOpacity
-                style={[styles.sheetBtnSmall, { backgroundColor: COLORS.card2 }]}
-                onPress={() => setDeletePinTarget(null)}
-              >
-                <Text style={styles.sheetBtnText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.sheetBtnSmall, { backgroundColor: COLORS.red }]}
-                onPress={async () => {
-                  try {
-                    await deleteEventPin(deletePinTarget.id);
-                    await reloadSharedPins(eventId);
-                    onPinsChanged?.();
-
-                    if (selectedPin?.id === deletePinTarget.id) {
-                      setSelectedPin(null);
-                      setIsEditingPin(false);
+                      setDeletePinTarget(null);
+                    } catch (error) {
+                      console.log("delete pin error:", error);
+                      alert(error?.message || "Failed to delete pin");
                     }
-
-                    setDeletePinTarget(null);
-                  } catch (error) {
-                    console.log("delete pin error:", error);
-                    alert(error?.message || "Failed to delete pin");
-                  }
-                }}
-              >
-                <Text style={styles.sheetBtnText}>Delete</Text>
-              </TouchableOpacity>
+                  }}
+                >
+                  <Text style={styles.sheetBtnText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      )}
-    </View>
+        )
+      }
+    </View >
   );
 }
 
@@ -5184,7 +5279,7 @@ function TripperTrackMain() {
             if (meters <= 8) nextPerson.distance = "Very close";
             else if (meters <= 20) nextPerson.distance = "Nearby";
             else if (meters < 1000) nextPerson.distance = `${Math.round(meters)}m away`;
-            else nextPerson.distance = `${(meters / 1000).toFixed(1)}km away`;
+            else nextPerson.distance = `${(meters / 1609.344).toFixed(1)}miles away`;
           }
         }
 
@@ -8584,4 +8679,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: "center",
   },
+  pinMarkerWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  meetupPulseRing: {
+    position: "absolute",
+    width: 33,
+    height: 33,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: "rgba(109, 243, 145, 0.71)",
+    backgroundColor: "rgba(6, 213, 23, 0.49)",
+  }
 })

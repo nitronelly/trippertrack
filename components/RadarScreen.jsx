@@ -39,6 +39,14 @@ export default function RadarScreen({
     bars: true,
     food: true,
   });
+  const isFestivalOnly =
+    radarFilters.festivals &&
+    !radarFilters.music &&
+    !radarFilters.theatre &&
+    !radarFilters.otherEvents &&
+    !radarFilters.explore &&
+    !radarFilters.bars &&
+    !radarFilters.food;
   const openPhotoViewer = (photos = [], startIndex = 0) => {
     const cleanPhotos = photos
       .map((p) => p.url || p.photoUrl || p.uri)
@@ -117,7 +125,12 @@ export default function RadarScreen({
     const roundedLng = userLocation.longitude.toFixed(2);
     const query = searchQuery.trim().toLowerCase();
 
-    const fetchKey = `${roundedLat}-${roundedLng}-${query}-${eventRange}-${distanceMiles}-${JSON.stringify(radarFilters)}`;
+    const filterKey = Object.entries(radarFilters)
+      .filter(([, value]) => value)
+      .map(([key]) => key)
+      .join(",");
+
+    const fetchKey = `${roundedLat}-${roundedLng}-${query}-${eventRange}-${distanceMiles}-${filterKey}`;
     if (lastFetchKeyRef.current === fetchKey) return;
     lastFetchKeyRef.current = fetchKey;
 
@@ -262,13 +275,23 @@ export default function RadarScreen({
         Math.round((Number(distanceMiles) || 10) * 1609.34),
         50000
       );
+      const query = searchQuery.trim().toLowerCase();
+      if (radarFilters.festivals) {
+        const festivalEvents = await fetchSkiddleFestivals(query);
 
+        setRadarItems([
+          { id: "section-festivals", type: "section", title: "🎪 Upcoming Festivals" },
+          ...festivalEvents,
+        ]);
+
+        return;
+      }
       const types = searchQuery.trim()
         ? ["keyword"]
         : ["bar", "night_club", "restaurant", "cafe", "meal_takeaway"];
 
       const allResults = [];
-      const keyword = searchQuery?.trim();
+      const keyword = isFestivalOnly ? "" : searchQuery?.trim();
 
       for (const type of types) {
         const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}${keyword
@@ -310,7 +333,7 @@ export default function RadarScreen({
                   ? "Distance unknown"
                   : distance < 1000
                     ? `${distance}m`
-                    : `${(distance / 1000).toFixed(1)}km`,
+                    : `${(distance / 1609.344).toFixed(1)}miles`,
 
               latitude: place.geometry.location.lat,
               longitude: place.geometry.location.lng,
@@ -354,16 +377,7 @@ export default function RadarScreen({
 
         return;
       }
-      if (radarFilters.festivals) {
-        const festivalEvents = await fetchSkiddleFestivals();
 
-        setRadarItems([
-          { id: "section-festivals", type: "section", title: "🎪 Upcoming Festivals" },
-          ...festivalEvents,
-        ]);
-
-        return;
-      }
       const skiddleEvents = await fetchSkiddleEvents();
       const ticketmasterEvents = await fetchTicketmasterEvents();
 
@@ -657,12 +671,11 @@ export default function RadarScreen({
     );
   }
 
-  async function fetchSkiddleFestivals() {
+  async function fetchSkiddleFestivals(query = "") {
     try {
-      const query = searchQuery.trim().toLowerCase();
 
       const now = new Date();
-      const year = now.getFullYear();
+      let year = now.getFullYear();
 
       const festivalMonths =
         eventRange === "today"
@@ -670,6 +683,15 @@ export default function RadarScreen({
           : eventRange === "week"
             ? [4, 5, 6, 7]
             : [8, 9, 10, 11];
+
+      // If this festival season block has already passed,
+      // search next year's block instead.
+      const blockEnd = new Date(year, festivalMonths[festivalMonths.length - 1] + 1, 0);
+      blockEnd.setHours(23, 59, 59, 999);
+
+      if (blockEnd < now) {
+        year += 1;
+      }
 
       const allResults = [];
 
@@ -714,20 +736,19 @@ export default function RadarScreen({
            ${event.description || ""}
            ${event.genres?.map((g) => g.name).join(" ") || ""}
            ${artists}
+           festival festivals music festival
          `.toLowerCase();
 
           return text.includes(query);
         })
         .filter((event) => {
-          if (eventRange !== "today") return true;
-
           const eventDate = new Date(event.startdate || event.date);
           if (Number.isNaN(eventDate.getTime())) return false;
 
-          const end = new Date();
-          end.setMonth(end.getMonth() + 1);
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
 
-          return eventDate >= now && eventDate <= end;
+          return eventDate >= todayStart;
         })
         .sort((a, b) => {
           const da = new Date(a.startdate || a.date).getTime();
@@ -849,21 +870,7 @@ export default function RadarScreen({
           Number.isFinite(event.longitude)
         );
 
-      if (events.length === 0) {
-        return [
-          {
-            id: "no-skiddle-events",
-            emoji: "🎟️",
-            type: "event",
-            title: `No events found ${eventRange === "today" ? "today" : eventRange === "week" ? "this week" : "this month"}`,
-            venue: "Try a bigger mile radius or search near Brighton",
-            status: "Skiddle checked",
-            distanceText: "",
-            latitude: userLocation.latitude,
-            longitude: userLocation.longitude,
-          },
-        ];
-      }
+      
       return events;
     } catch (err) {
       console.log("Skiddle error:", err);
